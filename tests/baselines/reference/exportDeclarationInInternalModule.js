@@ -69,7 +69,7 @@ declare module Aaa {
     }
 }
 declare module Bbb {
-    class SomeType {
+    export class SomeType {
     }
     export * from Aaa;
 }

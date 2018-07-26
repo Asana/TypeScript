@@ -1156,6 +1156,17 @@ namespace ts {
             return false;
         }
 
+        function isScopeMarker(node: Node) {
+            return isExportAssignment(node) || isExportDeclaration(node);
+        }
+
+        function hasScopeMarker(node: Node) {
+            if (isModuleBlock(node)) {
+                return some(node.statements, isScopeMarker);
+            }
+            return false;
+        }
+
         function ensureModifiers(node: Node, privateDeclaration?: boolean): ReadonlyArray<Modifier> {
             const currentFlags = getModifierFlags(node);
             const newFlags = ensureModifierFlags(node, privateDeclaration);
@@ -1170,7 +1181,7 @@ namespace ts {
             let additions = (needsDeclare && !isAlwaysType(node)) ? ModifierFlags.Ambient : ModifierFlags.None;
             const parentIsFile = node.parent.kind === SyntaxKind.SourceFile;
             if (!parentIsFile || (isBundledEmit && parentIsFile && isExternalModule(node.parent as SourceFile))) {
-                mask ^= ((privateDeclaration || (isBundledEmit && parentIsFile) ? 0 : ModifierFlags.Export) | ModifierFlags.Default | ModifierFlags.Ambient);
+                mask ^= ((privateDeclaration || (isBundledEmit && parentIsFile) || hasScopeMarker(node.parent) ? 0 : ModifierFlags.Export) | ModifierFlags.Ambient);
                 additions = ModifierFlags.None;
             }
             return maskModifierFlags(node, mask, additions);
@@ -1232,6 +1243,11 @@ namespace ts {
 
     function maskModifierFlags(node: Node, modifierMask: ModifierFlags = ModifierFlags.All ^ ModifierFlags.Public, modifierAdditions: ModifierFlags = ModifierFlags.None): ModifierFlags {
         let flags = (getModifierFlags(node) & modifierMask) | modifierAdditions;
+        if (flags & ModifierFlags.Default && !(flags & ModifierFlags.Export)) {
+            // A non-exported default is a nonsequitor - we usually try to remove all export modifiers
+            // from statements in ambient declarations; but a default export must retain its export modifier to be syntactically valid
+            flags ^= ModifierFlags.Export;
+        }
         if (flags & ModifierFlags.Default && flags & ModifierFlags.Ambient) {
             flags ^= ModifierFlags.Ambient; // `declare` is never required alongside `default` (and would be an error if printed)
         }
