@@ -11,6 +11,8 @@ namespace ts.performance {
     let counts: Map<number>;
     let marks: Map<number>;
     let measures: Map<number>;
+    let logDepth = 0;
+    let isFirstLogEvent = true;
 
     export interface Timer {
         enter(): void;
@@ -74,6 +76,7 @@ namespace ts.performance {
             const end = endMarkName && marks.get(endMarkName) || timestamp();
             const start = startMarkName && marks.get(startMarkName) || profilerStart;
             measures.set(measureName, (measures.get(measureName) || 0) + (end - start));
+            logSlowEvent(measureName, end - start);
         }
     }
 
@@ -118,5 +121,60 @@ namespace ts.performance {
     /** Disables performance measurements for the compiler. */
     export function disable() {
         enabled = false;
+    }
+
+    /**
+     * Increases the "depth" -- similar to the depth of a stack trace.
+     *
+     * This is used in the logging functions below. It sometimes results in better flame
+     * graphs.
+     */
+    export function increaseLogDepth() {
+        logDepth++;
+    }
+
+    export function decreaseLogDepth() {
+        logDepth--;
+    }
+
+    /** Calls logCompleteEvent() only if the event was "slow" (more than 10 milliseconds) */
+    export function logSlowEvent(name: string, durationMillis: number, args?: any) {
+        if (durationMillis > 10) {
+            const rand = Math.floor(Math.random() * 10000);
+            logCompleteEvent(`${name}-${rand}`, durationMillis, args);
+        }
+    }
+
+    /**
+     * Logs one "complete event" to stdout in chrome's profile format, as documented here:
+     * https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.lpfof2aylapb
+     * A complete event is one that has a begin time and a duration.
+     */
+    export function logCompleteEvent(name: string, durationMillis: number, args?: { [key: string]: any; }) {
+        logTraceEvent({
+            name,
+            cat: "build",
+            ph: "X",  // the phase type for "complete event", as per the doc
+            pid: 1,
+            tid: logDepth,  // we store the "depth" in the thread id; this gives us better graphs
+            ts: (Date.now() - durationMillis) * 1000,  // microseconds
+            dur: durationMillis * 1000,
+            ...(args && { args })  // only log "args:" if there are any
+        });
+    }
+
+    /**
+     * Logs one event to stdout in chrome's trace event format, as documented here:
+     * https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+     *
+     * Redirect compiler output to a file, e.g. `tsc > mybuild.profile`. Then open Chrome,
+     * navigate to `chrome://tracing`, click Load, and load mybuild.profile.
+     */
+    export function logTraceEvent(data: any) {
+        if (isFirstLogEvent) {
+            console.log("[");
+            isFirstLogEvent = false;
+        }
+        console.log("  " + JSON.stringify(data) + ",");
     }
 }

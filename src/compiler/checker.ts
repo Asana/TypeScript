@@ -7,6 +7,7 @@ namespace ts {
     let nextNodeId = 1;
     let nextMergeId = 1;
     let nextFlowId = 1;
+    let relatedTimer = performance.createTimer("isRelatedTo", "isRelatedToBegin", "isRelatedToEnd");
 
     const enum IterationUse {
         AllowsSyncIterablesFlag = 1 << 0,
@@ -15037,6 +15038,20 @@ namespace ts {
                 return true;
             }
 
+            function logProfileEvent(source: Type, target: Type, millis: number) {
+                const sourceName = source.symbol?.escapedName ?? "?";
+                const targetName = target.symbol?.escapedName ?? "?";
+                const sourceNode = source?.symbol?.declarations?.[0];
+                const sourceStr = sourceNode && ts.nodePosToString(sourceNode);
+                const targetNode = target?.symbol?.declarations?.[0];
+                const targetStr = targetNode && ts.nodePosToString(targetNode);
+                let args = {
+                    source: sourceStr,
+                    target: targetStr
+                };
+                performance.logSlowEvent(`${sourceName}, ${targetName}`, millis, args);
+            }
+
             /**
              * Compare two types and return
              * * Ternary.True if they are related with no assumptions,
@@ -15044,6 +15059,16 @@ namespace ts {
              * * Ternary.False if they are not related.
              */
             function isRelatedTo(originalSource: Type, originalTarget: Type, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
+                performance.increaseLogDepth();
+                const startMillis = ts.timestamp();
+                const result = _isRelatedTo(originalSource, originalTarget, reportErrors, headMessage, intersectionState);
+                const stopMillis = ts.timestamp();
+                logProfileEvent(originalSource, originalTarget, stopMillis - startMillis);
+                performance.decreaseLogDepth();
+                return result;
+            }
+
+            function _isRelatedTo(originalSource: Type, originalTarget: Type, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
                 // Normalize the source and target types: Turn fresh literal types into regular literal types,
                 // turn deferred type references into regular type references, simplify indexed access and
                 // conditional types, and resolve substitution types to either the substitution (on the source
@@ -15459,6 +15484,20 @@ namespace ts {
             // equal and infinitely expanding. Fourth, if we have reached a depth of 100 nested comparisons, assume we have runaway recursion
             // and issue an error. Otherwise, actually compare the structure of the two types.
             function recursiveTypeRelatedTo(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
+                relatedTimer.enter();
+                performance.increaseLogDepth();
+                const startMillis = ts.timestamp();
+                const retval = _recursiveTypeRelatedTo(source, target, reportErrors, intersectionState);
+                const stopMillis = ts.timestamp();
+                if (source.symbol) {
+                    logProfileEvent(source, target, stopMillis - startMillis);
+                }
+                performance.decreaseLogDepth();
+                relatedTimer.exit();
+                return retval;
+            }
+
+            function _recursiveTypeRelatedTo(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
                 if (overflow) {
                     return Ternary.False;
                 }
